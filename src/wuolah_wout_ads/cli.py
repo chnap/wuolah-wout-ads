@@ -14,7 +14,7 @@ def _one(args: tuple[str, str, bool]) -> dict:
     try:
         return clean_pdf(Path(src), Path(dst), force=force).__dict__
     except Exception as exc:
-        return CleanResult(src, dst, 0, [], "error", f"{type(exc).__name__}: {exc}").__dict__
+        return CleanResult(src, dst, 0, [], status="error", error=f"{type(exc).__name__}: {exc}").__dict__
 
 
 def main() -> None:
@@ -36,8 +36,14 @@ def main() -> None:
         destination = ns.output or source.with_name(source.stem + "_clean.pdf")
         pairs = [(source, destination)]
     else:
-        destination = ns.output or source.with_name(source.name + "_clean")
-        files = sorted(p for p in source.rglob("*.pdf") if p.is_file())
+        destination = (ns.output or source.with_name(source.name + "_clean")).resolve()
+        if destination == source:
+            parser.error("La carpeta de salida no puede ser la misma que la de entrada")
+        files = sorted(
+            p for p in source.rglob("*")
+            if p.is_file() and p.suffix.lower() == ".pdf"
+            and not p.resolve().is_relative_to(destination)
+        )
         pairs = [(p, destination / p.relative_to(source)) for p in files]
     tasks = [(str(src), str(dst), ns.force) for src, dst in pairs]
     if not tasks:
@@ -49,10 +55,21 @@ def main() -> None:
             rows.append(future.result())
     rows.sort(key=lambda x: x["source"].casefold())
     if ns.json:
-        print(json.dumps({"files": rows, "total": len(rows), "cleaned": sum(x["status"] == "cleaned" for x in rows), "errors": sum(x["status"] == "error" for x in rows)}, ensure_ascii=False))
+        print(json.dumps({
+            "files": rows,
+            "total": len(rows),
+            "cleaned": sum(x["status"] == "cleaned" for x in rows),
+            "removed_pages": sum(len(x["removed_pages"]) for x in rows),
+            "removed_regions": sum(len(x["removed_regions"]) for x in rows),
+            "errors": sum(x["status"] == "error" for x in rows),
+        }, ensure_ascii=False))
     else:
         for row in rows:
             removed = ",".join(map(str, row["removed_pages"])) or "ninguna"
             suffix = f" ({row['error']})" if row["error"] else ""
-            print(f"{row['status']}: {row['source']} -> {row['output']} | páginas promocionales: {removed}{suffix}")
+            print(f"{row['status']}: {row['source']} -> {row['output']} | páginas promocionales: {removed} | zonas publicitarias: {len(row['removed_regions'])}{suffix}")
         print(f"Listos: {sum(x['status'] == 'cleaned' for x in rows)}/{len(rows)}; errores: {sum(x['status'] == 'error' for x in rows)}")
+
+
+if __name__ == "__main__":
+    main()
