@@ -1,40 +1,102 @@
 # wuolah-wout-ads
 
-Limpiador local y por lotes para PDFs descargados de Wuolah. Usa PyMuPDF para inspeccionar texto, enlaces y rectángulos de imagen del propio PDF. No envía documentos a servicios externos, no usa OCR ni llama a modelos. El procesamiento consume **cero tokens de IA**; el asistente solo necesita ejecutar un comando.
+Fast, local batch cleaner for advertising in Wuolah PDFs. It inspects PDF text, links, and image placement with PyMuPDF. Files stay on your machine: there is no OCR, upload, or AI call, so cleaning uses **zero AI tokens**.
 
-## Instalar
+## Quick start
 
-Requiere Python 3.10 o posterior.
+Requires Python 3.10 or newer.
 
 ```bash
+git clone https://github.com/chnap/wuolah-wout-ads.git
+cd wuolah-wout-ads
+python -m venv .venv
+source .venv/bin/activate       # Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install .
-wuolah-wout-ads apuntes.pdf
-wuolah-wout-ads ./apuntes -o ./apuntes_limpios -j 4
 ```
 
-Las carpetas se recorren recursivamente, conservando su estructura relativa, también con extensiones `.PDF` en mayúsculas. Se procesan hasta cuatro PDFs a la vez por defecto. El original nunca se sobrescribe. Las salidas existentes se omiten, a menos que indiques `--force`. `--json` imprime un resumen compacto para automatización, incluyendo páginas y regiones retiradas.
-
-## Claude Code, Codex y OpenCode
-
-El repo incluye skills para Claude Code (`.claude/skills/`), Codex (`.agents/skills/`) y OpenCode (`.opencode/skills/`), además de una copia canónica en `skills/wuolah-wout-ads/`. La instrucción del agente evita cargar texto del documento en el prompt: invoca el binario y resume el JSON. Instala primero el paquete en el entorno disponible para el asistente.
+Clean one PDF:
 
 ```bash
-wuolah-wout-ads ./descargas -o ./descargas_limpias --json
+wuolah-wout-ads "./downloads/lecture-notes.pdf" \
+  --output "./clean/lecture-notes.pdf" \
+  --json
 ```
 
-## Alcance
+Clean every PDF in a folder, including its subfolders:
 
-El detector identifica páginas promocionales dedicadas con texto explícito de Wuolah; anuncios enlazados a destinos publicitarios que Wuolah oculta tras `track.wlh.es`; y el patrón gráfico de banner superior más banda lateral vertical. Este patrón se observó, por ejemplo, en la portada y el índice de un documento de 59 páginas: los anuncios de pie enlazados se limpian sin quitar el aviso legal contiguo. Los enlaces de seguimiento invisibles se eliminan también.
+```bash
+wuolah-wout-ads "./downloads" \
+  --output "./downloads-clean" \
+  --jobs 4 \
+  --json
+```
 
-El detector no usa OCR ni visión artificial. Un banner sin enlace reconocible y fuera del patrón de margen puede no detectarse. Las páginas escaneadas y los enlaces a `wuolah.com` se conservan. También se mantienen por defecto logos, marcas de agua, QR, avisos legales y contenido académico. `removed_regions` cuenta rectángulos publicitarios borrados; un valor de cero no garantiza que un PDF no tenga anuncios.
+The output folder keeps the input folder's relative structure. Use a separate output location so you can compare the cleaned copy with the original.
 
-Si el PDF no contiene una página promocional reconocible, se genera una copia en la ruta destino.
+## Usage
 
-## Desarrollo
+```text
+wuolah-wout-ads INPUT [-o OUTPUT] [-j JOBS] [--force] [--json]
+```
+
+| Option | Description |
+| --- | --- |
+| `INPUT` | A single PDF or a folder to scan recursively. The extension is case-insensitive. |
+| `-o`, `--output` | Destination PDF for one input file, or destination folder for a folder input. |
+| `-j`, `--jobs` | Number of PDFs to process at once. Defaults to up to 4. |
+| `--force` | Replace existing output files. The input PDF is never overwritten. |
+| `--json` | Print a machine-readable summary, useful for scripts and AI agents. |
+
+If `--output` is omitted, a single `notes.pdf` becomes `notes_clean.pdf`; a folder called `notes` becomes a sibling folder called `notes_clean`. Existing outputs are skipped unless `--force` is used.
+
+See all options with:
+
+```bash
+wuolah-wout-ads --help
+```
+
+## Reading the JSON result
+
+The summary includes totals for files cleaned, promotional pages removed, advertising regions removed, and errors. Each file result includes its status, source and output paths, page count, removed page numbers, and removed regions.
+
+```json
+{
+  "total": 1,
+  "cleaned": 1,
+  "removed_pages": 0,
+  "removed_regions": 2,
+  "errors": 0
+}
+```
+
+`removed_regions` counts white redaction rectangles, not every hidden tracking link removed. A status of `skipped` means the output already existed or the input contained nothing but promotional pages; inspect its `error` field for the reason. A status of `error` means that file could not be processed.
+
+## Using it with Claude Code, Codex, and OpenCode
+
+The repository includes agent skills for Claude Code (`.claude/skills/`), Codex (`.agents/skills/`), and OpenCode (`.opencode/skills/`). Install the package in the same Python environment available to your agent, then ask it to clean a PDF or folder. The skill tells the agent to run one local batch command and summarize the JSON; it does not load PDF contents into the prompt.
+
+Example request:
+
+> Clean all Wuolah PDFs in `./downloads` and save the results in `./downloads-clean`.
+
+## What it detects
+
+- Dedicated promotional pages with explicit Wuolah promotional text.
+- Ad click-through links routed through `track.wlh.es` to advertising destinations.
+- Wuolah's edge-banner layout when a top banner and tall side banner appear together.
+- Linked promotional copy in page footers. Invisible Wuolah tracking hotspots are removed too.
+
+The rules were refined against a real 59-page sample with a cover banner, two edge banners around the index, and linked ads in page footers. On that sample, the tool detected 76 advertising regions while preserving the study pages, index, and legal notices.
+
+## Limits
+
+This version does not use OCR or computer vision. An unlinked image ad outside the recognized edge-banner layout may be missed. Scanned study pages are preserved, as are normal links to Wuolah, logos, watermarks, QR codes, legal notices, and academic content. A zero-region count means no current rule matched; it does not prove that a PDF has no advertising.
+
+## Development
 
 ```bash
 python -m pip install -e .
 wuolah-wout-ads --help
 ```
 
-MIT. Consulta [LICENSE](LICENSE).
+MIT licensed. See [LICENSE](LICENSE).
