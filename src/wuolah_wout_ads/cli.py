@@ -29,6 +29,9 @@ def main() -> None:
     parser.add_argument("--json", action="store_true", help="imprime un resumen JSON compacto")
     parser.add_argument("--dry-run", action="store_true", help="informa qué limpiaría sin guardar cambios")
     parser.add_argument("--assume-wuolah", action="store_true", help="procesa un PDF aunque no tenga señales para reconocerlo como Wuolah")
+    parser.add_argument("--keep-wuolah-branding", action="store_true", help="conserva marcas, enlaces y metadatos identificables de Wuolah")
+    parser.add_argument("--branding-repeat-ratio", type=float, default=0.70, metavar="FRACTION", help="fracción mínima de páginas con la misma imagen de pie para tratarla como marca (por defecto: 0.70)")
+    parser.add_argument("--branding-footer-top", type=float, default=0.82, metavar="FRACTION", help="posición vertical mínima normalizada para detectar marcas de pie (por defecto: 0.82)")
     parser.add_argument("--min-link-area", type=float, default=0.004, metavar="FRACTION", help="área mínima del enlace publicitario respecto a la página (por defecto: 0.004)")
     parser.add_argument("--max-link-area", type=float, default=0.80, metavar="FRACTION", help="ignora enlaces que ocupan esta fracción o más de la página (por defecto: 0.80)")
     parser.add_argument("--banner-tolerance", type=float, default=0.025, metavar="FRACTION", help="tolerancia de separación entre banners, fracción de la altura (por defecto: 0.025)")
@@ -47,6 +50,8 @@ def main() -> None:
         parser.error("--min-link-area y --max-link-area deben cumplir 0 <= mínimo < máximo <= 1")
     if not 0 <= ns.banner_tolerance <= 1 or not 0 < ns.banner_top_min_width <= 1 or not 0 < ns.banner_side_min_height <= 1:
         parser.error("los parámetros geométricos de banners deben ser fracciones válidas entre 0 y 1")
+    if not 0 < ns.branding_repeat_ratio <= 1 or not 0 <= ns.branding_footer_top < 1:
+        parser.error("--branding-repeat-ratio debe estar en (0, 1] y --branding-footer-top en [0, 1)")
     color = ns.redaction_color.removeprefix("#")
     if len(color) != 6 or any(char not in "0123456789abcdefABCDEF" for char in color):
         parser.error("--redaction-color debe usar el formato #RRGGBB")
@@ -76,6 +81,9 @@ def main() -> None:
         image_redaction=ns.image_redaction,
         graphics_redaction=ns.graphics_redaction,
         fill_color=fill_color,
+        remove_wuolah_branding=not ns.keep_wuolah_branding,
+        branding_repeat_ratio=ns.branding_repeat_ratio,
+        branding_footer_top=ns.branding_footer_top,
     )
     tasks = [(str(src), str(dst), ns.force, options, ns.dry_run, ns.assume_wuolah) for src, dst in pairs]
     if not tasks:
@@ -99,18 +107,20 @@ def main() -> None:
             "would_clean": sum(x["status"] == "would_clean" for x in rows),
             "removed_pages": sum(len(x["removed_pages"]) for x in rows),
             "removed_regions": sum(len(x["removed_regions"]) for x in rows),
+            "removed_branding": sum(len(x["removed_branding"]) for x in rows),
             "errors": sum(x["status"] == "error" for x in rows),
         }, ensure_ascii=False))
     else:
         for row in rows:
             removed = ",".join(map(str, row["removed_pages"])) or "ninguna"
             suffix = f" ({row['error']})" if row["error"] else ""
-            print(f"{row['status']}: {row['source']} -> {row['output']} | páginas promocionales: {removed} | zonas publicitarias: {len(row['removed_regions'])}{suffix}")
+            print(f"{row['status']}: {row['source']} -> {row['output']} | páginas promocionales: {removed} | zonas publicitarias: {len(row['removed_regions'])} | marcas Wuolah: {len(row['removed_branding'])}{suffix}")
         print(
             f"Limpiados: {sum(x['status'] == 'cleaned' for x in rows)}; "
             f"sin cambios: {sum(x['status'] == 'unchanged' for x in rows)}; "
             f"omitidos: {sum(x['status'] == 'skipped' for x in rows)}; "
             f"se limpiarían: {sum(x['status'] == 'would_clean' for x in rows)}; "
+            f"marcas Wuolah eliminadas: {sum(len(x['removed_branding']) for x in rows)}; "
             f"errores: {sum(x['status'] == 'error' for x in rows)}"
         )
 

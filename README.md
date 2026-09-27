@@ -38,6 +38,8 @@ wuolah-wout-ads ~/Downloads/apuntes.pdf --json
 
 The original file is replaced with its cleaned version, keeping the same name and folder. The write is atomic: if processing fails, the original stays in place. PDFs not recognized as Wuolah are skipped. Use `-o` if you want to save a separate copy instead.
 
+By default, the cleaner also removes detectable Wuolah branding: Wuolah links and metadata, footer text that names Wuolah, and small image marks repeated in the same footer position on most pages. It reports these in `removed_branding`. Use `--keep-wuolah-branding` to retain them.
+
 ### A whole folder
 
 ```bash
@@ -65,6 +67,9 @@ wuolah-wout-ads "$HOME/Downloads/Mis apuntes.pdf"
 | `--force` | With `--output`, replace output files that already exist. |
 | `--dry-run` | Report detections without writing files. Combine with `--json` to review the results. |
 | `--assume-wuolah` | Process one PDF even if its metadata and links do not identify it as Wuolah. Not allowed on a folder. |
+| `--keep-wuolah-branding` | Keep detectable Wuolah links, metadata, footer text, and repeated footer image marks. |
+| `--branding-repeat-ratio 0.7` | Minimum share of pages where a small footer image must repeat to be treated as a Wuolah mark (default `0.70`). |
+| `--branding-footer-top 0.82` | Minimum normalized vertical position for repeated footer marks (default `0.82`). |
 | `--min-link-area 0.002` | Lower the minimum ad-link rectangle size (fraction of page area; default `0.004`). |
 | `--max-link-area 0.9` | Raise the maximum ad-link rectangle size (default `0.80`). Larger links may cover study scans, so use carefully. |
 | `--banner-tolerance 0.04` | Allow a larger gap between the top and side banner (default `0.025`). |
@@ -81,7 +86,7 @@ Example with a summary:
 wuolah-wout-ads ~/Downloads/Wuolah --json
 ```
 
-`removed_regions` counts the detected ad areas covered, `removed_pages` counts entire promotional pages removed, `skipped` includes non-Wuolah PDFs, and `errors` counts PDFs that could not be processed. A skipped or unchanged PDF is left alone. With `--output`, an existing destination is skipped unless you add `--force`.
+`removed_regions` counts detected ad areas covered, `removed_pages` counts entire promotional pages removed, and `removed_branding` counts detected Wuolah links, metadata fields, footer text, and repeated footer images. `skipped` includes non-Wuolah PDFs, and `errors` counts PDFs that could not be processed. A skipped or unchanged PDF is left alone. With `--output`, an existing destination is skipped unless you add `--force`.
 
 The image-redaction default is `pixels`: it clears detected pixels inside an ad rectangle instead of leaving the underlying banner image visible. The detector still uses the recognized Wuolah patterns; tune its area and banner thresholds only when the JSON shows a specific miss.
 
@@ -101,12 +106,13 @@ Then ask your agent: “Clean the PDFs in `~/Downloads/Wuolah` and save them in 
 - Tracked ad links routed through `track.wlh.es` to advertising destinations.
 - The specific top-banner plus side-banner image layout found around some Wuolah index pages.
 - Linked advertising copy in page footers and invisible Wuolah tracking hotspots.
+- Wuolah named links and metadata, footer text, and small images repeated in a consistent footer position across most pages.
 
-The rules were refined against a real 59-page sample with explicit promotional content, the paired banner layout, and linked footer ads. Other graphical banners are not identified by appearance. Redaction blanks pixels within the detected ad boxes so banner images do not remain visible under a text-only overlay.
+The rules were refined against a real 59-page sample with explicit promotional content, the paired banner layout, linked footer ads, and a repeated footer image mark. Redaction blanks pixels within detected ad boxes so banner images do not remain visible under a text-only overlay.
 
 ## Limits
 
-The cleaner has no OCR or general computer vision. Ads without explicit promotional text, recognizable ad links, or the specific paired banner layout may be missed. It preserves scanned study pages, normal Wuolah links, logos, watermarks, QR codes, legal notices, and academic content. A result with zero detected regions does not prove a PDF has no ads.
+The cleaner has no OCR or general computer vision. It can remove Wuolah marks only when they can be identified from link destinations, metadata, footer text, or a small image repeated in a consistent footer position. Other visual marks may remain, and the cleaner may leave a logo when it cannot attribute it safely to Wuolah. A downloaded PDF also cannot be reconstructed exactly as the author originally exported or sent it. A result with zero detected regions does not prove a PDF has no ads or platform marks.
 
 ## Development
 
