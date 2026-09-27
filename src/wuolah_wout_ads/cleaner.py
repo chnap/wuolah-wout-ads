@@ -30,6 +30,18 @@ AD_DESTINATION_MARKERS = (
 )
 
 
+@dataclass(frozen=True)
+class CleanOptions:
+    min_link_area: float = 0.004
+    max_link_area: float = 0.80
+    banner_tolerance: float = 0.025
+    banner_top_min_width: float = 0.84
+    banner_side_min_height: float = 0.70
+    image_redaction: str = "pixels"
+    graphics_redaction: str = "contained"
+    fill_color: tuple[float, float, float] = (1.0, 1.0, 1.0)
+
+
 @dataclass
 class CleanResult:
     source: str
@@ -86,7 +98,7 @@ def _rect_area(rect: pymupdf.Rect) -> float:
     return max(0.0, rect.width) * max(0.0, rect.height)
 
 
-def _ad_link_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
+def _ad_link_rects(page: pymupdf.Page, options: CleanOptions) -> list[pymupdf.Rect]:
     area = page.rect.width * page.rect.height
     found = []
     for link in page.get_links():
@@ -95,12 +107,12 @@ def _ad_link_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
         # Large click targets may enclose a whole scan. Preserve those pages;
         # the source PDF frequently links its original scanned test pages.
         ratio = _rect_area(rect) / area if area else 0
-        if _tracked_ad_destination(uri) and 0.004 <= ratio < 0.80:
+        if _tracked_ad_destination(uri) and options.min_link_area <= ratio < options.max_link_area:
             found.append(rect)
     return found
 
 
-def _margin_ad_pair(page: pymupdf.Page) -> list[pymupdf.Rect]:
+def _margin_ad_pair(page: pymupdf.Page, options: CleanOptions) -> list[pymupdf.Rect]:
     """Find Wuolah's distinctive top-banner + full-height side-banner layout."""
     width, height = page.rect.width, page.rect.height
     images = [pymupdf.Rect(info["bbox"]) & page.rect for info in page.get_image_info()]
@@ -108,19 +120,19 @@ def _margin_ad_pair(page: pymupdf.Page) -> list[pymupdf.Rect]:
         rect for rect in images
         if rect.x0 <= width * 0.025
         and rect.y0 <= height * 0.025
-        and rect.width >= width * 0.84
+        and rect.width >= width * options.banner_top_min_width
         and height * 0.055 <= rect.height <= height * 0.19
     ]
     side_banners = [
         rect for rect in images
         if rect.x0 <= width * 0.025
         and width * 0.07 <= rect.width <= width * 0.19
-        and rect.height >= height * 0.70
+        and rect.height >= height * options.banner_side_min_height
         and rect.y1 >= height * 0.94
     ]
     for top in top_banners:
         for side in side_banners:
-            if abs(side.y0 - top.y1) <= height * 0.025:
+            if abs(side.y0 - top.y1) <= height * options.banner_tolerance:
                 return [top, side]
     return []
 
@@ -138,8 +150,10 @@ def _unique_rects(rects: list[pymupdf.Rect]) -> list[pymupdf.Rect]:
     return out
 
 
-def _clean_page_ads(page: pymupdf.Page, page_number: int) -> list[dict[str, str | int]]:
-    rects = _ad_link_rects(page) + _margin_ad_pair(page)
+def _clean_page_ads(
+    page: pymupdf.Page, page_number: int, options: CleanOptions,
+) -> list[dict[str, str | int]]:
+    rects = _ad_link_rects(page, options) + _margin_ad_pair(page, options)
     rects = _unique_rects(rects)
     if not rects:
         # Remove Wuolah's tracking hotspots, including tiny invisible pixels,
@@ -153,26 +167,38 @@ def _clean_page_ads(page: pymupdf.Page, page_number: int) -> list[dict[str, str 
 
     regions: list[dict[str, str | int]] = []
     for rect in rects:
-        page.add_redact_annot(rect, fill=(1, 1, 1), cross_out=False)
+        page.add_redact_annot(rect, fill=options.fill_color, cross_out=False)
         regions.append({"page": page_number, "kind": "advertisement"})
 
-    # Keep background/image objects and nearby diagrams intact. The white
-    # redaction fill visually clears only each detected ad rectangle; text
-    # inside it and overlapping links are physically removed by MuPDF.
-    page.apply_redactions(images=0, graphics=0, text=0)
+    # Redact actual pixels inside detected ad regions. The previous images=0
+    # setting ignored image data, so banners remained visible in the output.
+    image_modes = {"none": 0, "remove": 1, "pixels": 2}
+    graphics_modes = {"none": 0, "covered": 1, "contained": 2}
+    page.apply_redactions(
+        images=image_modes[options.image_redaction],
+        graphics=graphics_modes[options.graphics_redaction],
+        text=0,
+    )
     for link in page.get_links():
         if urlparse(link.get("uri", "")).hostname == TRACK_HOST:
             page.delete_link(link)
     return regions
 
 
-def clean_pdf(source: Path, output: Path | None = None, *, force: bool = False) -> CleanResult:
+def clean_pdf(
+    source: Path,
+    output: Path | None = None,
+    *,
+    force: bool = False,
+    options: CleanOptions = CleanOptions(),
+    dry_run: bool = False,
+    assume_wuolah: bool = False,
+) -> CleanResult:
     source = source.resolve()
     output = (output or source).resolve()
     in_place = source == output
     if output.exists() and not in_place and not force:
         return CleanResult(str(source), str(output), 0, [], status="skipped", error="la salida ya existe")
-    output.parent.mkdir(parents=True, exist_ok=True)
     temp_output = output.with_name(f".{output.stem}.{uuid4().hex}.tmp{output.suffix or '.pdf'}")
     try:
         with pymupdf.open(source) as doc:
@@ -184,7 +210,7 @@ def clean_pdf(source: Path, output: Path | None = None, *, force: bool = False) 
                 if _page_promo_text(text):
                     removed.append(i)
                     promo_pages.append(i)
-            if not _is_wuolah_document(doc, promo_pages, source):
+            if not assume_wuolah and not _is_wuolah_document(doc, promo_pages, source):
                 return CleanResult(
                     str(source), str(output), original_count, [],
                     status="skipped", error="no parece un PDF de Wuolah",
@@ -193,7 +219,7 @@ def clean_pdf(source: Path, output: Path | None = None, *, force: bool = False) 
             removed_set = set(removed)
             for i, page in enumerate(doc):
                 if i not in removed_set:
-                    regions.extend(_clean_page_ads(page, i + 1))
+                    regions.extend(_clean_page_ads(page, i + 1, options))
             for i in reversed(removed):
                 doc.delete_page(i)
             if doc.page_count == 0:
@@ -203,7 +229,13 @@ def clean_pdf(source: Path, output: Path | None = None, *, force: bool = False) 
                 )
             if not removed and not regions:
                 return CleanResult(str(source), str(output), original_count, [], status="unchanged")
-            doc.save(temp_output, garbage=3, deflate=True)
+            if dry_run:
+                return CleanResult(
+                    str(source), str(output), original_count,
+                    [i + 1 for i in removed], regions, "would_clean",
+                )
+            output.parent.mkdir(parents=True, exist_ok=True)
+            doc.save(temp_output, garbage=4, deflate=True, deflate_images=True, clean=True)
         if in_place:
             temp_output.chmod(stat.S_IMODE(source.stat().st_mode))
         temp_output.replace(output)

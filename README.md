@@ -63,6 +63,16 @@ wuolah-wout-ads "$HOME/Downloads/Mis apuntes.pdf"
 | `--json` | Print a compact summary for scripts or an AI agent. |
 | `--jobs 8` | Process up to eight PDFs at once instead of the default four. |
 | `--force` | With `--output`, replace output files that already exist. |
+| `--dry-run` | Report detections without writing files. Combine with `--json` to review the results. |
+| `--assume-wuolah` | Process one PDF even if its metadata and links do not identify it as Wuolah. Not allowed on a folder. |
+| `--min-link-area 0.002` | Lower the minimum ad-link rectangle size (fraction of page area; default `0.004`). |
+| `--max-link-area 0.9` | Raise the maximum ad-link rectangle size (default `0.80`). Larger links may cover study scans, so use carefully. |
+| `--banner-tolerance 0.04` | Allow a larger gap between the top and side banner (default `0.025`). |
+| `--banner-top-min-width 0.80` | Detect narrower top strips (default `0.84`). |
+| `--banner-side-min-height 0.65` | Detect shorter side strips (default `0.70`). |
+| `--image-redaction pixels\|remove\|none` | Default `pixels` blanks only detected image pixels; `remove` removes an intersecting image object; `none` leaves images untouched. |
+| `--graphics-redaction contained\|covered\|none` | Control vector graphics in ad zones (default `contained`). `covered` removes any intersecting vector graphic and may affect nearby content. |
+| `--redaction-color '#FFFFFF'` | Set the fill color of cleared regions using a hex color. |
 | `--help` | Show all options. |
 
 Example with a summary:
@@ -72,6 +82,8 @@ wuolah-wout-ads ~/Downloads/Wuolah --json
 ```
 
 `removed_regions` counts the detected ad areas covered, `removed_pages` counts entire promotional pages removed, `skipped` includes non-Wuolah PDFs, and `errors` counts PDFs that could not be processed. A skipped or unchanged PDF is left alone. With `--output`, an existing destination is skipped unless you add `--force`.
+
+The image-redaction default is `pixels`: it clears detected pixels inside an ad rectangle instead of leaving the underlying banner image visible. The detector still uses the recognized Wuolah patterns; tune its area and banner thresholds only when the JSON shows a specific miss.
 
 ## Use it from Claude Code, Codex, or OpenCode
 
@@ -90,7 +102,7 @@ Then ask your agent: “Clean the PDFs in `~/Downloads/Wuolah` and save them in 
 - The specific top-banner plus side-banner image layout found around some Wuolah index pages.
 - Linked advertising copy in page footers and invisible Wuolah tracking hotspots.
 
-The rules were refined against a real 59-page sample with explicit promotional content, the paired banner layout, and linked footer ads. Other graphical banners are not identified by appearance.
+The rules were refined against a real 59-page sample with explicit promotional content, the paired banner layout, and linked footer ads. Other graphical banners are not identified by appearance. Redaction blanks pixels within the detected ad boxes so banner images do not remain visible under a text-only overlay.
 
 ## Limits
 
