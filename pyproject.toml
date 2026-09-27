@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wuolah-wout-ads"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fast, local batch cleaner for promotional pages in Wuolah PDFs"
 readme = "README.md"
 requires-python = ">=3.10"

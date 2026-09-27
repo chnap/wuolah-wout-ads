@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import re
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
@@ -40,14 +41,29 @@ class CleanResult:
     error: str | None = None
 
 
-def _page_promo(page: pymupdf.Page) -> bool:
-    text = " ".join(page.get_text("text").split())
+def _page_promo_text(text: str) -> bool:
+    text = " ".join(text.split())
     return (
         bool(text)
         and len(text) < 1800
         and bool(re.search(r"\bwuolah\b", text, re.I))
         and any(pattern.search(text) for pattern in PROMO_PATTERNS)
     )
+
+
+def _is_wuolah_document(doc: pymupdf.Document, promo_pages: list[int], source: Path) -> bool:
+    """Require a positive Wuolah signal before changing a PDF."""
+    if source.name.casefold().startswith("wuolah-") or promo_pages:
+        return True
+    metadata = doc.metadata or {}
+    if any("wuolah" in str(value).casefold() for value in metadata.values() if value):
+        return True
+    for page in doc:
+        for link in page.get_links():
+            host = (urlparse(link.get("uri", "")).hostname or "").casefold()
+            if host == TRACK_HOST or host == "wuolah.com" or host.endswith(".wuolah.com"):
+                return True
+    return False
 
 
 def _tracked_ad_destination(uri: str) -> bool:
@@ -128,10 +144,12 @@ def _clean_page_ads(page: pymupdf.Page, page_number: int) -> list[dict[str, str 
     if not rects:
         # Remove Wuolah's tracking hotspots, including tiny invisible pixels,
         # while leaving normal outbound links (e.g. the source-document link).
+        removed_tracking = []
         for link in page.get_links():
             if urlparse(link.get("uri", "")).hostname == TRACK_HOST:
                 page.delete_link(link)
-        return []
+                removed_tracking.append({"page": page_number, "kind": "tracking_link"})
+        return removed_tracking
 
     regions: list[dict[str, str | int]] = []
     for rect in rects:
@@ -148,19 +166,29 @@ def _clean_page_ads(page: pymupdf.Page, page_number: int) -> list[dict[str, str 
     return regions
 
 
-def clean_pdf(source: Path, output: Path, *, force: bool = False) -> CleanResult:
+def clean_pdf(source: Path, output: Path | None = None, *, force: bool = False) -> CleanResult:
     source = source.resolve()
-    output = output.resolve()
-    if source == output:
-        raise ValueError("El archivo de salida no puede sobrescribir el original.")
-    if output.exists() and not force:
+    output = (output or source).resolve()
+    in_place = source == output
+    if output.exists() and not in_place and not force:
         return CleanResult(str(source), str(output), 0, [], status="skipped", error="la salida ya existe")
     output.parent.mkdir(parents=True, exist_ok=True)
     temp_output = output.with_name(f".{output.stem}.{uuid4().hex}.tmp{output.suffix or '.pdf'}")
     try:
         with pymupdf.open(source) as doc:
             original_count = doc.page_count
-            removed = [i for i, page in enumerate(doc) if _page_promo(page)]
+            removed = []
+            promo_pages = []
+            for i, page in enumerate(doc):
+                text = page.get_text("text")
+                if _page_promo_text(text):
+                    removed.append(i)
+                    promo_pages.append(i)
+            if not _is_wuolah_document(doc, promo_pages, source):
+                return CleanResult(
+                    str(source), str(output), original_count, [],
+                    status="skipped", error="no parece un PDF de Wuolah",
+                )
             regions: list[dict[str, str | int]] = []
             removed_set = set(removed)
             for i, page in enumerate(doc):
@@ -173,7 +201,11 @@ def clean_pdf(source: Path, output: Path, *, force: bool = False) -> CleanResult
                     str(source), str(output), original_count, [i + 1 for i in removed],
                     regions, "skipped", "el documento solo contiene páginas promocionales",
                 )
+            if not removed and not regions:
+                return CleanResult(str(source), str(output), original_count, [], status="unchanged")
             doc.save(temp_output, garbage=3, deflate=True)
+        if in_place:
+            temp_output.chmod(stat.S_IMODE(source.stat().st_mode))
         temp_output.replace(output)
         return CleanResult(str(source), str(output), original_count, [i + 1 for i in removed], regions)
     finally:

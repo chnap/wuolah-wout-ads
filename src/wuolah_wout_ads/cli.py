@@ -18,11 +18,11 @@ def _one(args: tuple[str, str, bool]) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="wuolah-wout-ads", description="Limpia páginas promocionales Wuolah de PDFs en local.")
+    parser = argparse.ArgumentParser(prog="wuolah-wout-ads", description="Limpia PDFs de Wuolah localmente y omite otros documentos.")
     parser.add_argument("input", type=Path, help="PDF o carpeta de entrada")
-    parser.add_argument("-o", "--output", type=Path, help="archivo de salida o carpeta de destino")
+    parser.add_argument("-o", "--output", type=Path, help="guarda copias limpias en esta ruta; por defecto reemplaza los PDFs Wuolah originales")
     parser.add_argument("-j", "--jobs", type=int, default=min(4, os.cpu_count() or 1), help="PDFs simultáneos (por defecto: hasta 4)")
-    parser.add_argument("--force", action="store_true", help="sobrescribe salidas existentes, nunca el original")
+    parser.add_argument("--force", action="store_true", help="con --output, reemplaza archivos de salida existentes")
     parser.add_argument("--json", action="store_true", help="imprime un resumen JSON compacto")
     ns = parser.parse_args()
     source = ns.input.resolve()
@@ -33,18 +33,17 @@ def main() -> None:
     if source.is_file():
         if source.suffix.lower() != ".pdf":
             parser.error("La entrada debe ser un PDF")
-        destination = ns.output or source.with_name(source.stem + "_clean.pdf")
+        destination = ns.output.resolve() if ns.output else source
         pairs = [(source, destination)]
     else:
-        destination = (ns.output or source.with_name(source.name + "_clean")).resolve()
-        if destination == source:
-            parser.error("La carpeta de salida no puede ser la misma que la de entrada")
+        destination = ns.output.resolve() if ns.output else source
+        output_is_inside_input = destination != source and destination.is_relative_to(source)
         files = sorted(
             p for p in source.rglob("*")
             if p.is_file() and p.suffix.lower() == ".pdf"
-            and not p.resolve().is_relative_to(destination)
+            and not (output_is_inside_input and p.resolve().is_relative_to(destination))
         )
-        pairs = [(p, destination / p.relative_to(source)) for p in files]
+        pairs = [(p, p if destination == source else destination / p.relative_to(source)) for p in files]
     tasks = [(str(src), str(dst), ns.force) for src, dst in pairs]
     if not tasks:
         parser.error("No se encontraron archivos PDF")
@@ -59,6 +58,8 @@ def main() -> None:
             "files": rows,
             "total": len(rows),
             "cleaned": sum(x["status"] == "cleaned" for x in rows),
+            "unchanged": sum(x["status"] == "unchanged" for x in rows),
+            "skipped": sum(x["status"] == "skipped" for x in rows),
             "removed_pages": sum(len(x["removed_pages"]) for x in rows),
             "removed_regions": sum(len(x["removed_regions"]) for x in rows),
             "errors": sum(x["status"] == "error" for x in rows),
@@ -68,7 +69,12 @@ def main() -> None:
             removed = ",".join(map(str, row["removed_pages"])) or "ninguna"
             suffix = f" ({row['error']})" if row["error"] else ""
             print(f"{row['status']}: {row['source']} -> {row['output']} | páginas promocionales: {removed} | zonas publicitarias: {len(row['removed_regions'])}{suffix}")
-        print(f"Listos: {sum(x['status'] == 'cleaned' for x in rows)}/{len(rows)}; errores: {sum(x['status'] == 'error' for x in rows)}")
+        print(
+            f"Limpiados: {sum(x['status'] == 'cleaned' for x in rows)}; "
+            f"sin cambios: {sum(x['status'] == 'unchanged' for x in rows)}; "
+            f"omitidos: {sum(x['status'] == 'skipped' for x in rows)}; "
+            f"errores: {sum(x['status'] == 'error' for x in rows)}"
+        )
 
 
 if __name__ == "__main__":
