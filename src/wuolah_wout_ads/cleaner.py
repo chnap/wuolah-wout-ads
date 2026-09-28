@@ -48,6 +48,12 @@ class CleanOptions:
     branding_footer_top: float = 0.82
     branding_max_width: float = 0.40
     branding_max_height: float = 0.08
+    remove_wuolah_cover: bool = True
+    wuolah_cover_max_text: int = 500
+    remove_full_page_ads: bool = True
+    full_page_image_coverage: float = 0.90
+    full_page_ad_max_text: int = 80
+    full_page_neighbor_min_text: int = 500
 
 
 @dataclass
@@ -60,6 +66,7 @@ class CleanResult:
     status: str = "cleaned"
     error: str | None = None
     removed_branding: list[dict[str, str | int]] = field(default_factory=list)
+    removed_page_reasons: list[dict[str, str | int]] = field(default_factory=list)
 
 
 def _page_promo_text(text: str) -> bool:
@@ -138,6 +145,48 @@ def _repeated_footer_brand_images(
     return matches
 
 
+def _largest_image_page_coverage(page: pymupdf.Page) -> float:
+    page_area = page.rect.width * page.rect.height
+    if not page_area:
+        return 0.0
+    return max(
+        (
+            _rect_area(pymupdf.Rect(info["bbox"]) & page.rect) / page_area
+            for info in page.get_image_info()
+        ),
+        default=0.0,
+    )
+
+
+def _full_page_insert_pages(
+    doc: pymupdf.Document, page_texts: list[str], options: CleanOptions,
+) -> tuple[set[int], list[dict[str, str | int]]]:
+    """Find a Wuolah front cover and sparse full-page ad inserts between notes."""
+    removed: set[int] = set()
+    reasons: list[dict[str, str | int]] = []
+    if options.remove_wuolah_cover and doc.page_count:
+        first = doc.load_page(0)
+        if (
+            _largest_image_page_coverage(first) >= options.full_page_image_coverage
+            and len(page_texts[0].strip()) <= options.wuolah_cover_max_text
+        ):
+            removed.add(0)
+            reasons.append({"page": 1, "kind": "wuolah_cover"})
+
+    if options.remove_full_page_ads and doc.page_count >= 3:
+        for index in range(1, doc.page_count - 1):
+            if index in removed or len(page_texts[index].strip()) > options.full_page_ad_max_text:
+                continue
+            if _largest_image_page_coverage(doc.load_page(index)) < options.full_page_image_coverage:
+                continue
+            before = len(page_texts[index - 1].strip())
+            after = len(page_texts[index + 1].strip())
+            if before >= options.full_page_neighbor_min_text and after >= options.full_page_neighbor_min_text:
+                removed.add(index)
+                reasons.append({"page": index + 1, "kind": "full_page_advertisement"})
+    return removed, reasons
+
+
 def _tracked_ad_destination(uri: str) -> bool:
     """Recognize Wuolah's base64-wrapped outbound ad-click links."""
     parsed = urlparse(uri)
@@ -210,14 +259,10 @@ def _unique_rects(rects: list[pymupdf.Rect]) -> list[pymupdf.Rect]:
     return out
 
 
-def _footer_brand_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
+def _wuolah_brand_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
     found = []
-    footer_start = page.rect.height * 0.78
     for term in ("wuolah", "wlh.es"):
-        for rect in page.search_for(term):
-            rect = pymupdf.Rect(rect)
-            if rect.y0 >= footer_start:
-                found.append(rect)
+        found.extend(pymupdf.Rect(rect) for rect in page.search_for(term))
     return _unique_rects(found)
 
 
@@ -226,7 +271,7 @@ def _clean_page_ads(
 ) -> tuple[list[dict[str, str | int]], list[dict[str, str | int]]]:
     rects = _ad_link_rects(page, options) + _margin_ad_pair(page, options)
     rects = _unique_rects(rects)
-    brand_rects = _footer_brand_rects(page) if options.remove_wuolah_branding else []
+    brand_rects = _wuolah_brand_rects(page) if options.remove_wuolah_branding else []
     regions: list[dict[str, str | int]] = []
     for rect in rects:
         page.add_redact_annot(rect, fill=options.fill_color, cross_out=False)
@@ -312,8 +357,10 @@ def clean_pdf(
             original_count = doc.page_count
             removed = []
             promo_pages = []
+            page_texts = []
             for i, page in enumerate(doc):
                 text = page.get_text("text")
+                page_texts.append(text)
                 if _page_promo_text(text):
                     removed.append(i)
                     promo_pages.append(i)
@@ -322,6 +369,12 @@ def clean_pdf(
                     str(source), str(output), original_count, [],
                     status="skipped", error="no parece un PDF de Wuolah",
                 )
+            whole_page_removals, page_reasons = _full_page_insert_pages(doc, page_texts, options)
+            for page_index in whole_page_removals:
+                if page_index not in removed:
+                    removed.append(page_index)
+            removed.sort()
+
             regions: list[dict[str, str | int]] = []
             branding: list[dict[str, str | int]] = []
             if options.remove_wuolah_branding:
@@ -346,6 +399,7 @@ def clean_pdf(
                 return CleanResult(
                     str(source), str(output), original_count, [i + 1 for i in removed],
                     regions, "skipped", "el documento solo contiene páginas promocionales",
+                    removed_page_reasons=page_reasons,
                 )
             if not removed and not regions and not branding:
                 return CleanResult(str(source), str(output), original_count, [], status="unchanged")
@@ -354,6 +408,7 @@ def clean_pdf(
                     str(source), str(output), original_count,
                     [i + 1 for i in removed], regions, "would_clean",
                     removed_branding=branding,
+                    removed_page_reasons=page_reasons,
                 )
             output.parent.mkdir(parents=True, exist_ok=True)
             doc.save(temp_output, garbage=4, deflate=True, deflate_images=True, clean=True)
@@ -363,6 +418,7 @@ def clean_pdf(
         return CleanResult(
             str(source), str(output), original_count, [i + 1 for i in removed],
             regions, removed_branding=branding,
+            removed_page_reasons=page_reasons,
         )
     finally:
         temp_output.unlink(missing_ok=True)

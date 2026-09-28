@@ -30,8 +30,16 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="informa qué limpiaría sin guardar cambios")
     parser.add_argument("--assume-wuolah", action="store_true", help="procesa un PDF aunque no tenga señales para reconocerlo como Wuolah")
     parser.add_argument("--keep-wuolah-branding", action="store_true", help="conserva marcas, enlaces y metadatos identificables de Wuolah")
+    parser.add_argument("--keep-wuolah-cover", action="store_true", help="conserva la portada inicial de imagen completa aunque parezca una cubierta de Wuolah")
+    parser.add_argument("--keep-full-page-ads", action="store_true", help="no elimina páginas insertadas con imagen casi a página completa y muy poco texto")
     parser.add_argument("--branding-repeat-ratio", type=float, default=0.70, metavar="FRACTION", help="fracción mínima de páginas con la misma imagen de pie para tratarla como marca (por defecto: 0.70)")
     parser.add_argument("--branding-footer-top", type=float, default=0.82, metavar="FRACTION", help="posición vertical mínima normalizada para detectar marcas de pie (por defecto: 0.82)")
+    parser.add_argument("--branding-max-width", type=float, default=0.40, metavar="FRACTION", help="ancho máximo relativo de una imagen repetida para considerarla marca (por defecto: 0.40)")
+    parser.add_argument("--branding-max-height", type=float, default=0.08, metavar="FRACTION", help="alto máximo relativo de una imagen repetida para considerarla marca (por defecto: 0.08)")
+    parser.add_argument("--full-page-image-coverage", type=float, default=0.90, metavar="FRACTION", help="cobertura mínima de imagen para una portada o inserción de página completa (por defecto: 0.90)")
+    parser.add_argument("--wuolah-cover-max-text", type=int, default=500, metavar="CHARS", help="máximo de caracteres extraídos para reconocer una portada de imagen (por defecto: 500)")
+    parser.add_argument("--full-page-ad-max-text", type=int, default=80, metavar="CHARS", help="máximo de caracteres extraídos de una inserción publicitaria (por defecto: 80)")
+    parser.add_argument("--full-page-neighbor-min-text", type=int, default=500, metavar="CHARS", help="texto mínimo en cada página vecina para confirmar una inserción (por defecto: 500)")
     parser.add_argument("--min-link-area", type=float, default=0.004, metavar="FRACTION", help="área mínima del enlace publicitario respecto a la página (por defecto: 0.004)")
     parser.add_argument("--max-link-area", type=float, default=0.80, metavar="FRACTION", help="ignora enlaces que ocupan esta fracción o más de la página (por defecto: 0.80)")
     parser.add_argument("--banner-tolerance", type=float, default=0.025, metavar="FRACTION", help="tolerancia de separación entre banners, fracción de la altura (por defecto: 0.025)")
@@ -50,8 +58,10 @@ def main() -> None:
         parser.error("--min-link-area y --max-link-area deben cumplir 0 <= mínimo < máximo <= 1")
     if not 0 <= ns.banner_tolerance <= 1 or not 0 < ns.banner_top_min_width <= 1 or not 0 < ns.banner_side_min_height <= 1:
         parser.error("los parámetros geométricos de banners deben ser fracciones válidas entre 0 y 1")
-    if not 0 < ns.branding_repeat_ratio <= 1 or not 0 <= ns.branding_footer_top < 1:
-        parser.error("--branding-repeat-ratio debe estar en (0, 1] y --branding-footer-top en [0, 1)")
+    if not 0 < ns.branding_repeat_ratio <= 1 or not 0 <= ns.branding_footer_top < 1 or not 0 < ns.branding_max_width <= 1 or not 0 < ns.branding_max_height <= 1:
+        parser.error("las fracciones de marca deben estar entre 0 y 1 (ratio y tamaños > 0; posición de pie < 1)")
+    if not 0 < ns.full_page_image_coverage <= 1 or ns.full_page_ad_max_text < 0 or ns.full_page_neighbor_min_text < 0 or ns.wuolah_cover_max_text < 0:
+        parser.error("los parámetros de páginas completas deben ser fracciones/cantidades válidas")
     color = ns.redaction_color.removeprefix("#")
     if len(color) != 6 or any(char not in "0123456789abcdefABCDEF" for char in color):
         parser.error("--redaction-color debe usar el formato #RRGGBB")
@@ -84,6 +94,14 @@ def main() -> None:
         remove_wuolah_branding=not ns.keep_wuolah_branding,
         branding_repeat_ratio=ns.branding_repeat_ratio,
         branding_footer_top=ns.branding_footer_top,
+        branding_max_width=ns.branding_max_width,
+        branding_max_height=ns.branding_max_height,
+        remove_wuolah_cover=not ns.keep_wuolah_cover,
+        wuolah_cover_max_text=ns.wuolah_cover_max_text,
+        remove_full_page_ads=not ns.keep_full_page_ads,
+        full_page_image_coverage=ns.full_page_image_coverage,
+        full_page_ad_max_text=ns.full_page_ad_max_text,
+        full_page_neighbor_min_text=ns.full_page_neighbor_min_text,
     )
     tasks = [(str(src), str(dst), ns.force, options, ns.dry_run, ns.assume_wuolah) for src, dst in pairs]
     if not tasks:
@@ -106,6 +124,7 @@ def main() -> None:
             "skipped": sum(x["status"] == "skipped" for x in rows),
             "would_clean": sum(x["status"] == "would_clean" for x in rows),
             "removed_pages": sum(len(x["removed_pages"]) for x in rows),
+            "removed_page_reasons": [reason for x in rows for reason in x["removed_page_reasons"]],
             "removed_regions": sum(len(x["removed_regions"]) for x in rows),
             "removed_branding": sum(len(x["removed_branding"]) for x in rows),
             "errors": sum(x["status"] == "error" for x in rows),

@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wuolah-wout-ads"
-version = "0.5.0"
-description = "Fast local cleaner for ads and detectable Wuolah branding in PDFs"
+version = "0.6.0"
+description = "Fast pure-Python-rule cleaner for ads and Wuolah branding in PDFs"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
