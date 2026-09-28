@@ -31,6 +31,11 @@ AD_DESTINATION_MARKERS = (
     "adclick.",
     "googleadservices.com",
 )
+WUOLAH_RIGHTS_FOOTER_TEXT = (
+    "Reservados todos los derechos",
+    "No se permite la explotación económica",
+    "Queda permitida la impresión en su totalidad",
+)
 
 
 @dataclass(frozen=True)
@@ -261,7 +266,7 @@ def _unique_rects(rects: list[pymupdf.Rect]) -> list[pymupdf.Rect]:
 
 def _wuolah_brand_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
     found = []
-    for term in ("wuolah", "wlh.es"):
+    for term in ("wuolah", "wlh.es", *WUOLAH_RIGHTS_FOOTER_TEXT):
         found.extend(pymupdf.Rect(rect) for rect in page.search_for(term))
     return _unique_rects(found)
 

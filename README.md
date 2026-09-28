@@ -38,7 +38,7 @@ wuolah-wout-ads ~/Downloads/apuntes.pdf --json
 
 The original file is replaced with its cleaned version, keeping the same name and folder. The write is atomic: if processing fails, the original stays in place. PDFs not recognized as Wuolah are skipped. Use `-o` if you want to save a separate copy instead.
 
-By default, the cleaner also removes detectable Wuolah branding: Wuolah links and metadata, page text that names Wuolah, and small image marks repeated in the same footer position on most pages. It also removes an image-based first-page cover and sparse, near-full-page image inserts surrounded by text-heavy notes. These deterministic layout rules require no AI or OCR. The JSON reports removed pages and their reasons in `removed_page_reasons`, and marks in `removed_branding`. Use the `--keep-*` switches to retain these items.
+By default, the cleaner also removes detectable Wuolah branding: Wuolah links and metadata, page text that names Wuolah, its repeated Spanish rights footer (including the rotated side version), and small image marks repeated in the same footer position on most pages. It also removes an image-based first-page cover and sparse, near-full-page image inserts surrounded by text-heavy notes. These deterministic layout rules require no AI or OCR. The JSON reports removed pages and their reasons in `removed_page_reasons`, and marks in `removed_branding`. Use the `--keep-*` switches to retain these items.
 
 ### A whole folder
 
@@ -93,7 +93,7 @@ Example with a summary:
 wuolah-wout-ads ~/Downloads/Wuolah --json
 ```
 
-`removed_regions` counts detected ad areas covered, `removed_pages` counts entire promotional pages removed, `removed_page_reasons` explains each page removal, and `removed_branding` counts detected Wuolah links, metadata fields, page text, and repeated footer images. `skipped` includes non-Wuolah PDFs, and `errors` counts PDFs that could not be processed. A skipped or unchanged PDF is left alone. With `--output`, an existing destination is skipped unless you add `--force`.
+`removed_regions` counts detected ad areas covered, `removed_pages` counts entire promotional pages removed, `removed_page_reasons` explains each page removal, and `removed_branding` counts detected Wuolah links, metadata fields, page text, the repeated rights footer, and repeated footer images. `skipped` includes non-Wuolah PDFs, and `errors` counts PDFs that could not be processed. A skipped or unchanged PDF is left alone. With `--output`, an existing destination is skipped unless you add `--force`.
 
 The image-redaction default is `pixels`: it clears detected pixels inside an ad rectangle instead of leaving the underlying banner image visible. The detector still uses the recognized Wuolah patterns; tune its area and banner thresholds only when the JSON shows a specific miss.
 
@@ -114,13 +114,14 @@ Then ask your agent: “Clean the PDFs in `~/Downloads/Wuolah` and save them in 
 - The specific top-banner plus side-banner image layout found around some Wuolah index pages.
 - Linked advertising copy in page footers and invisible Wuolah tracking hotspots.
 - Wuolah named links and metadata, footer text, and small images repeated in a consistent footer position across most pages.
+- The repeated Spanish rights statement added along the bottom or rotated along the right edge of pages.
 - A sparse, image-based cover on page one and sparse, near-full-page image inserts between text-heavy study pages.
 
 The rules were refined against a real 59-page sample with explicit promotional content, the paired banner layout, linked footer ads, and a repeated footer image mark. Redaction blanks pixels within detected ad boxes so banner images do not remain visible under a text-only overlay.
 
 ## Limits
 
-The cleaner uses deterministic Python rules, with no OCR, computer-vision model, or AI call. A full-page insert is removed only when it has very little extractable text, covers most of the page with an image, and sits between text-heavy pages; scanned study pages can still resemble this pattern, so tune the thresholds or use `--keep-full-page-ads` if needed. Other visual marks may remain when they cannot be attributed safely to Wuolah. A downloaded PDF cannot be reconstructed exactly as the author originally exported or sent it. A result with zero detections does not prove a PDF has no ads or platform marks.
+The cleaner uses deterministic Python rules, with no OCR, computer-vision model, or AI call. It clears the repeated rights footer by removing its detected text rectangles; it does not crop or reflow the author's page layout, so whitespace that belongs to the source remains. A full-page insert is removed only when it has very little extractable text, covers most of the page with an image, and sits between text-heavy pages; scanned study pages can still resemble this pattern, so tune the thresholds or use `--keep-full-page-ads` if needed. Other visual marks may remain when they cannot be attributed safely to Wuolah. A downloaded PDF cannot be reconstructed exactly as the author originally exported or sent it. A result with zero detections does not prove a PDF has no ads or platform marks.
 
 ## Development
 

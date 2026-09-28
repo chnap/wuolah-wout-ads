@@ -1,6 +1,6 @@
 ---
 name: wuolah-wout-ads
-description: Elimina localmente publicidad textual, enlaces, portadas de plataforma y ciertas inserciones de imagen a página completa en PDFs de Wuolah, incluso en carpetas completas. Úsala cuando el usuario pida limpiar, quitar anuncios o marcas o procesar PDFs de Wuolah.
+description: Elimina localmente publicidad textual, enlaces, portadas, marcas y el aviso repetido de derechos de Wuolah, además de ciertas inserciones de imagen a página completa en PDFs de Wuolah. Úsala cuando el usuario pida limpiar, quitar anuncios o marcas o procesar PDFs de Wuolah.
 ---
 
 # Wuolah Wout Ads
@@ -27,6 +27,7 @@ Delega la limpieza al CLI local. **No leas, resumas ni copies páginas del PDF a
 - Rectángulos enlazados a destinos publicitarios que Wuolah envuelve en `track.wlh.es`, por ejemplo enlaces de seguimiento hacia `adclick` o `doubleclick`. Conserva los enlaces normales al documento o a Wuolah.
 - Páginas enteras promocionales con texto explícito de Wuolah y poco contenido.
 - Una portada inicial de imagen casi completa y poco texto, y anuncios insertados como imagen casi completa con muy poco texto entre páginas con contenido.
+- El aviso legal repetido de Wuolah en el pie inferior o en el margen derecho girado.
 - Elimina también los pequeños enlaces de seguimiento de Wuolah que no tienen contenido visible.
 
 Los patrones observados incluyen páginas promocionales explícitas, una portada de imagen, inserciones de anuncios de imagen con muy poco texto entre páginas con apuntes, y copy publicitario enlazado. Las reglas de página completa usan cobertura de imagen y texto extraíble como señales; no usan OCR ni modelos visuales.
