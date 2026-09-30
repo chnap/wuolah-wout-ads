@@ -36,6 +36,13 @@ def main() -> None:
     parser.add_argument("--branding-footer-top", type=float, default=0.82, metavar="FRACTION", help="posición vertical mínima normalizada para detectar marcas de pie (por defecto: 0.82)")
     parser.add_argument("--branding-max-width", type=float, default=0.40, metavar="FRACTION", help="ancho máximo relativo de una imagen repetida para considerarla marca (por defecto: 0.40)")
     parser.add_argument("--branding-max-height", type=float, default=0.08, metavar="FRACTION", help="alto máximo relativo de una imagen repetida para considerarla marca (por defecto: 0.08)")
+    parser.add_argument("--black-mark-repeat-ratio", type=float, default=0.25, metavar="FRACTION", help="fracción mínima de páginas donde debe repetirse un rectángulo negro de pie (por defecto: 0.25, mínimo 2 páginas)")
+    parser.add_argument("--black-mark-right-min", type=float, default=0.55, metavar="FRACTION", help="posición horizontal mínima para buscar rectángulos negros de pie (por defecto: 0.55)")
+    parser.add_argument("--black-mark-footer-top", type=float, default=0.82, metavar="FRACTION", help="posición vertical mínima para buscar rectángulos negros de pie (por defecto: 0.82)")
+    parser.add_argument("--black-mark-min-width", type=float, default=0.06, metavar="FRACTION", help="ancho mínimo relativo del rectángulo negro (por defecto: 0.06)")
+    parser.add_argument("--black-mark-max-width", type=float, default=0.36, metavar="FRACTION", help="ancho máximo relativo del rectángulo negro (por defecto: 0.36)")
+    parser.add_argument("--black-mark-min-height", type=float, default=0.005, metavar="FRACTION", help="alto mínimo relativo del rectángulo negro (por defecto: 0.005)")
+    parser.add_argument("--black-mark-max-height", type=float, default=0.08, metavar="FRACTION", help="alto máximo relativo del rectángulo negro (por defecto: 0.08)")
     parser.add_argument("--full-page-image-coverage", type=float, default=0.90, metavar="FRACTION", help="cobertura mínima de imagen para una portada o inserción de página completa (por defecto: 0.90)")
     parser.add_argument("--wuolah-cover-max-text", type=int, default=500, metavar="CHARS", help="máximo de caracteres extraídos para reconocer una portada de imagen (por defecto: 500)")
     parser.add_argument("--full-page-ad-max-text", type=int, default=80, metavar="CHARS", help="máximo de caracteres extraídos de una inserción publicitaria (por defecto: 80)")
@@ -60,6 +67,11 @@ def main() -> None:
         parser.error("los parámetros geométricos de banners deben ser fracciones válidas entre 0 y 1")
     if not 0 < ns.branding_repeat_ratio <= 1 or not 0 <= ns.branding_footer_top < 1 or not 0 < ns.branding_max_width <= 1 or not 0 < ns.branding_max_height <= 1:
         parser.error("las fracciones de marca deben estar entre 0 y 1 (ratio y tamaños > 0; posición de pie < 1)")
+    if (not 0 < ns.black_mark_repeat_ratio <= 1 or not 0 <= ns.black_mark_right_min < 1
+            or not 0 <= ns.black_mark_footer_top < 1
+            or not 0 < ns.black_mark_min_width <= ns.black_mark_max_width <= 1
+            or not 0 < ns.black_mark_min_height <= ns.black_mark_max_height <= 1):
+        parser.error("los parámetros del rectángulo negro deben ser fracciones válidas entre 0 y 1")
     if not 0 < ns.full_page_image_coverage <= 1 or ns.full_page_ad_max_text < 0 or ns.full_page_neighbor_min_text < 0 or ns.wuolah_cover_max_text < 0:
         parser.error("los parámetros de páginas completas deben ser fracciones/cantidades válidas")
     color = ns.redaction_color.removeprefix("#")
@@ -96,6 +108,13 @@ def main() -> None:
         branding_footer_top=ns.branding_footer_top,
         branding_max_width=ns.branding_max_width,
         branding_max_height=ns.branding_max_height,
+        black_mark_repeat_ratio=ns.black_mark_repeat_ratio,
+        black_mark_right_min=ns.black_mark_right_min,
+        black_mark_footer_top=ns.black_mark_footer_top,
+        black_mark_min_width=ns.black_mark_min_width,
+        black_mark_max_width=ns.black_mark_max_width,
+        black_mark_min_height=ns.black_mark_min_height,
+        black_mark_max_height=ns.black_mark_max_height,
         remove_wuolah_cover=not ns.keep_wuolah_cover,
         wuolah_cover_max_text=ns.wuolah_cover_max_text,
         remove_full_page_ads=not ns.keep_full_page_ads,

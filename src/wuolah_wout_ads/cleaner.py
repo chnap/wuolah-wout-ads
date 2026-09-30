@@ -53,6 +53,13 @@ class CleanOptions:
     branding_footer_top: float = 0.82
     branding_max_width: float = 0.40
     branding_max_height: float = 0.08
+    black_mark_repeat_ratio: float = 0.25
+    black_mark_right_min: float = 0.55
+    black_mark_footer_top: float = 0.82
+    black_mark_min_width: float = 0.06
+    black_mark_max_width: float = 0.36
+    black_mark_min_height: float = 0.005
+    black_mark_max_height: float = 0.08
     remove_wuolah_cover: bool = True
     wuolah_cover_max_text: int = 500
     remove_full_page_ads: bool = True
@@ -148,6 +155,134 @@ def _repeated_footer_brand_images(
         ):
             matches[xref] = sorted(page_instances)
     return matches
+
+
+def _repeated_watermark_images(
+    doc: pymupdf.Document, options: CleanOptions,
+) -> dict[int, list[int]]:
+    """Find a shared compact image stamp repeatedly placed at one page position."""
+    placements: dict[int, dict[int, pymupdf.Rect]] = defaultdict(dict)
+    for page_index, page in enumerate(doc):
+        if not page.rect.width or not page.rect.height:
+            continue
+        for image in page.get_image_info(xrefs=True):
+            xref = image.get("xref", 0)
+            if xref <= 0 or image.get("width", 0) <= 2 or image.get("height", 0) <= 2:
+                continue
+            # Transparent image overlays are the common representation for a
+            # reusable watermark. Opaque repeated study images are preserved.
+            if not image.get("has-mask", False):
+                continue
+            rect = pymupdf.Rect(image["bbox"]) & page.rect
+            area_ratio = _rect_area(rect) / (page.rect.width * page.rect.height)
+            if 0 < area_ratio <= 0.12:
+                placements[xref].setdefault(page_index, rect)
+    threshold = max(2, math.ceil(doc.page_count * options.branding_repeat_ratio))
+    matches: dict[int, list[int]] = {}
+    for xref, by_page in placements.items():
+        if len(by_page) < threshold:
+            continue
+        normalized = []
+        for page_index, rect in by_page.items():
+            page = doc.load_page(page_index)
+            normalized.append((rect.x0 / page.rect.width, rect.y0 / page.rect.height,
+                               rect.x1 / page.rect.width, rect.y1 / page.rect.height))
+        reference = normalized[0]
+        if all(max(abs(a - b) for a, b in zip(reference, coords)) <= 0.02 for coords in normalized[1:]):
+            matches[xref] = sorted(index + 1 for index in by_page)
+    return matches
+
+
+def _black_footer_candidates(page: pymupdf.Page, options: CleanOptions) -> list[pymupdf.Rect]:
+    """Find compact, solid black rectangles in the lower-right footer area.
+
+    A low-resolution grayscale render catches rectangles embedded in scans as
+    well as vector shapes. Candidates are only removed when repeated across
+    pages at nearly the same normalized position.
+    """
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(0.5, 0.5), colorspace=pymupdf.csGRAY, alpha=False)
+    width, height = pix.width, pix.height
+    if not width or not height:
+        return []
+    samples = memoryview(pix.samples)
+    x_start = max(0, int(width * options.black_mark_right_min))
+    y_start = max(0, int(height * options.black_mark_footer_top))
+    row_runs: list[tuple[int, int, int]] = []
+    components: list[dict[str, int]] = []
+    # Merge dark horizontal runs across adjacent rows into connected blocks.
+    for y in range(y_start, height):
+        row = y * width
+        x = x_start
+        runs = []
+        while x < width:
+            if samples[row + x] >= 28:
+                x += 1
+                continue
+            start = x
+            while x < width and samples[row + x] < 28:
+                x += 1
+            if x - start >= max(3, int(width * options.black_mark_min_width * 0.8)):
+                runs.append((start, x))
+        next_active = []
+        for start, end in runs:
+            match = next((c for c in components if c["y1"] == y - 1 and start <= c["x1"] + 1 and end >= c["x0"] - 1), None)
+            if match is None:
+                components.append({"x0": start, "x1": end, "y0": y, "y1": y, "pixels": end - start})
+            else:
+                match["x0"] = min(match["x0"], start)
+                match["x1"] = max(match["x1"], end)
+                match["y1"] = y
+                match["pixels"] += end - start
+                next_active.append(match)
+        # Components are kept in this list for final filtering; gaps break continuity.
+        row_runs = [(start, end, y) for start, end in runs]
+    del row_runs
+
+    rects = []
+    for comp in components:
+        rw, rh = comp["x1"] - comp["x0"], comp["y1"] - comp["y0"] + 1
+        nw, nh = rw / width, rh / height
+        occupancy = comp["pixels"] / (rw * rh) if rw and rh else 0
+        if (options.black_mark_min_width <= nw <= options.black_mark_max_width
+                and options.black_mark_min_height <= nh <= options.black_mark_max_height
+                and occupancy >= 0.88):
+            sx, sy = page.rect.width / width, page.rect.height / height
+            rects.append(pymupdf.Rect(comp["x0"] * sx, comp["y0"] * sy,
+                                      comp["x1"] * sx, (comp["y1"] + 1) * sy))
+    return rects
+
+
+def _repeated_black_footer_marks(
+    doc: pymupdf.Document, options: CleanOptions, excluded_pages: set[int],
+) -> dict[int, list[pymupdf.Rect]]:
+    occurrences: list[tuple[int, pymupdf.Rect, tuple[float, float, float, float]]] = []
+    for index, page in enumerate(doc):
+        if index in excluded_pages:
+            continue
+        for rect in _black_footer_candidates(page, options):
+            norm = (rect.x0 / page.rect.width, rect.y0 / page.rect.height,
+                    rect.x1 / page.rect.width, rect.y1 / page.rect.height)
+            occurrences.append((index, rect, norm))
+    # Cluster rectangles by normalized geometry; one hit on a single page is
+    # deliberately insufficient to erase potentially legitimate study content.
+    clusters: list[list[tuple[int, pymupdf.Rect, tuple[float, float, float, float]]]] = []
+    for item in occurrences:
+        cluster = next((group for group in clusters if
+            max(abs(a - b) for a, b in zip(item[2], group[0][2])) <= 0.015), None)
+        if cluster is None:
+            clusters.append([item])
+        else:
+            cluster.append(item)
+    threshold = max(2, math.ceil(doc.page_count * options.black_mark_repeat_ratio))
+    found: dict[int, list[pymupdf.Rect]] = defaultdict(list)
+    for cluster in clusters:
+        by_page: dict[int, pymupdf.Rect] = {}
+        for index, rect, _ in cluster:
+            by_page.setdefault(index, rect)
+        if len(by_page) >= threshold:
+            for index, rect in by_page.items():
+                found[index].append(rect)
+    return found
 
 
 def _largest_image_page_coverage(page: pymupdf.Page) -> float:
@@ -273,6 +408,7 @@ def _wuolah_brand_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
 
 def _clean_page_ads(
     page: pymupdf.Page, page_number: int, options: CleanOptions,
+    black_marks: list[pymupdf.Rect] | None = None,
 ) -> tuple[list[dict[str, str | int]], list[dict[str, str | int]]]:
     rects = _ad_link_rects(page, options) + _margin_ad_pair(page, options)
     rects = _unique_rects(rects)
@@ -285,8 +421,12 @@ def _clean_page_ads(
     for rect in brand_rects:
         page.add_redact_annot(rect, fill=options.fill_color, cross_out=False)
         branding.append({"page": page_number, "kind": "footer_brand_text"})
+    for rect in black_marks or []:
+        padding = 0.6
+        page.add_redact_annot(rect + (-padding, -padding, padding, padding), fill=options.fill_color, cross_out=False)
+        branding.append({"page": page_number, "kind": "repeated_black_footer_mark"})
 
-    if rects or brand_rects:
+    if rects or brand_rects or black_marks:
         # Pixel mode clears the selected area without discarding nearby study
         # image content. The earlier images=0 setting left banners visible.
         image_modes = {"none": 0, "remove": 1, "pixels": 2}
@@ -382,20 +522,31 @@ def clean_pdf(
 
             regions: list[dict[str, str | int]] = []
             branding: list[dict[str, str | int]] = []
+            black_marks = (
+                _repeated_black_footer_marks(doc, options, set(removed))
+                if options.remove_wuolah_branding else {}
+            )
             if options.remove_wuolah_branding:
-                for xref, page_numbers in _repeated_footer_brand_images(doc, options).items():
+                repeated_images = _repeated_footer_brand_images(doc, options)
+                repeated_images.update({
+                    xref: pages for xref, pages in _repeated_watermark_images(doc, options).items()
+                    if xref not in repeated_images
+                })
+                for xref, page_numbers in repeated_images.items():
                     # PyMuPDF replaces this image xref globally, including its
                     # uses on every page, with a transparent 1x1 image.
                     doc.load_page(page_numbers[0] - 1).delete_image(xref)
                     branding.extend(
-                        {"page": page_no, "kind": "repeated_footer_image"}
+                        {"page": page_no, "kind": "repeated_transparent_image_mark"}
                         for page_no in page_numbers
                     )
                 branding.extend(_remove_wuolah_metadata(doc))
             removed_set = set(removed)
             for i, page in enumerate(doc):
                 if i not in removed_set:
-                    page_regions, page_branding = _clean_page_ads(page, i + 1, options)
+                    page_regions, page_branding = _clean_page_ads(
+                        page, i + 1, options, black_marks.get(i),
+                    )
                     regions.extend(page_regions)
                     branding.extend(page_branding)
             for i in reversed(removed):

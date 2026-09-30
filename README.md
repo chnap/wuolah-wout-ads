@@ -38,7 +38,7 @@ wuolah-wout-ads ~/Downloads/apuntes.pdf --json
 
 The original file is replaced with its cleaned version, keeping the same name and folder. The write is atomic: if processing fails, the original stays in place. PDFs not recognized as Wuolah are skipped. Use `-o` if you want to save a separate copy instead.
 
-By default, the cleaner also removes detectable Wuolah branding: Wuolah links and metadata, page text that names Wuolah, its repeated Spanish rights footer (including the rotated side version), and small image marks repeated in the same footer position on most pages. It also removes an image-based first-page cover and sparse, near-full-page image inserts surrounded by text-heavy notes. These deterministic layout rules require no AI or OCR. The JSON reports removed pages and their reasons in `removed_page_reasons`, and marks in `removed_branding`. Use the `--keep-*` switches to retain these items.
+By default, the cleaner also removes detectable Wuolah branding: Wuolah links and metadata, page text that names Wuolah, its repeated Spanish rights footer (including the rotated side version), and small image marks repeated in the same footer position on most pages. It detects compact solid black rectangles embedded in scans or vector art when the same mark repeats in the lower-right footer on at least two pages. It also removes an image-based first-page cover and sparse, near-full-page image inserts surrounded by text-heavy notes. These deterministic layout rules require no AI or OCR. The JSON reports removed pages and their reasons in `removed_page_reasons`, and marks in `removed_branding`. Use the `--keep-*` switches to retain these items.
 
 ### A whole folder
 
@@ -70,9 +70,13 @@ wuolah-wout-ads "$HOME/Downloads/Mis apuntes.pdf"
 | `--keep-wuolah-branding` | Keep detectable Wuolah links, metadata, footer text, and repeated footer image marks. |
 | `--keep-wuolah-cover` | Keep a first page that looks like a sparse, image-based cover. |
 | `--keep-full-page-ads` | Keep sparse, near-full-page image pages between text-heavy pages. |
-| `--branding-repeat-ratio 0.7` | Minimum share of pages where a small footer image must repeat to be treated as a Wuolah mark (default `0.70`). |
+| `--branding-repeat-ratio 0.7` | Minimum share of pages where a footer image or transparent mark must repeat at the same position (default `0.70`). |
 | `--branding-footer-top 0.82` | Minimum normalized vertical position for repeated footer marks (default `0.82`). |
 | `--branding-max-width 0.4` / `--branding-max-height 0.08` | Maximum normalized dimensions for a repeated footer mark. |
+| `--black-mark-repeat-ratio 0.25` | Minimum page fraction for a repeated black footer mark; always requires at least two pages. |
+| `--black-mark-right-min 0.55` / `--black-mark-footer-top 0.82` | Lower-right area scanned for compact black marks. |
+| `--black-mark-min-width 0.06` / `--black-mark-max-width 0.36` | Relative width range for black marks. |
+| `--black-mark-min-height 0.005` / `--black-mark-max-height 0.08` | Relative height range for black marks. |
 | `--full-page-image-coverage 0.9` | Minimum share of a page covered by one image to consider cover or insert rules (default `0.90`). |
 | `--wuolah-cover-max-text 500` | Maximum extracted text characters for the first-page cover rule. |
 | `--full-page-ad-max-text 80` | Maximum extracted text characters for an interstitial full-page ad (default `80`). |
