@@ -5,7 +5,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSettings, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QSettings, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QFont
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
@@ -119,6 +119,7 @@ class MainWindow(QMainWindow):
         self.theme = self.settings.value("theme", "light")
         self.worker_thread: QThread | None = None
         self.worker: BatchWorker | None = None
+        self._status_widgets: dict[str, QLabel] = {}
         self.setWindowTitle("Wuolah Wout Ads")
         self.setMinimumSize(760, 690)
         self.resize(880, 790)
@@ -195,7 +196,7 @@ class MainWindow(QMainWindow):
         page.addLayout(buttons)
 
         queue_header = QHBoxLayout()
-        queue_title = QLabel("Archivos seleccionados")
+        queue_title = QLabel("Tu lote")
         queue_title.setObjectName("sectionTitle")
         self.count_label = QLabel("0 elementos")
         self.count_label.setObjectName("muted")
@@ -209,10 +210,11 @@ class MainWindow(QMainWindow):
         self.file_list.setAlternatingRowColors(False)
         self.file_list.setMinimumHeight(120)
         self.file_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        empty = QListWidgetItem("Todavía no has añadido nada")
+        empty = QListWidgetItem()
         empty.setFlags(Qt.ItemFlag.NoItemFlags)
-        empty.setForeground(Qt.GlobalColor.gray)
+        empty.setSizeHint(self._empty_row_size())
         self.file_list.addItem(empty)
+        self.file_list.setItemWidget(empty, self._empty_row())
         page.addWidget(self.file_list, 1)
 
         options = QFrame()
@@ -284,10 +286,17 @@ class MainWindow(QMainWindow):
             QLabel#dropSymbol {{ color: {colors['accent']}; font-size: 26px; font-weight: 500; }}
             QLabel#dropHeading {{ font-size: 15px; font-weight: 650; }}
             QListWidget#fileList {{ background: {colors['surface']}; border: 1px solid {colors['line']}; border-radius: 14px; padding: 7px; outline: none; }}
-            QListWidget#fileList::item {{ padding: 11px 10px; border-radius: 8px; }}
-            QListWidget#fileList::item:selected {{ background: {colors['surface2']}; }}
+            QFrame#fileRow {{ background: transparent; border-radius: 9px; }}
+            QFrame#fileRow:hover {{ background: {colors['surface2']}; }}
+            QLabel#fileBadge {{ background: {colors['surface2']}; color: {colors['accent']}; border-radius: 8px; padding: 8px; font-size: 10px; font-weight: 800; }}
+            QLabel#fileName {{ font-size: 13px; font-weight: 650; }}
+            QLabel#filePath {{ color: {colors['muted']}; font-size: 11px; }}
+            QLabel#statusChip {{ background: {colors['surface2']}; color: {colors['muted']}; border-radius: 8px; padding: 5px 9px; font-size: 11px; }}
+            QLabel#emptyTitle {{ color: {colors['text']}; font-weight: 600; }}
+            QPushButton#rowRemoveButton {{ color: {colors['muted']}; background: transparent; padding: 3px 8px; font-size: 18px; }}
+            QPushButton#rowRemoveButton:hover {{ color: #e05d6f; background: {colors['surface2']}; }}
             QFrame#optionsCard {{ background: {colors['surface']}; border: 1px solid {colors['line']}; border-radius: 13px; }}
-            QCheckBox {{ font-weight: 650; spacing: 9px; }}
+            QCheckBox {{ color: {colors['text']}; font-weight: 650; spacing: 9px; }}
             QCheckBox::indicator {{ width: 17px; height: 17px; }}
             QPushButton {{ border: 0; border-radius: 10px; padding: 10px 15px; font-weight: 600; }}
             QPushButton#primaryButton {{ background: {colors['accent']}; color: white; padding: 13px 21px; }}
@@ -317,6 +326,8 @@ class MainWindow(QMainWindow):
         self.output_label.setVisible(visible)
 
     def add_paths(self, paths: list[str]) -> None:
+        if self.worker_thread is not None:
+            return
         existing = {self.file_list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.file_list.count())}
         if self.file_list.count() == 1 and self.file_list.item(0).flags() == Qt.ItemFlag.NoItemFlags:
             self.file_list.clear()
@@ -327,18 +338,103 @@ class MainWindow(QMainWindow):
             normalized = str(path.resolve())
             if normalized in existing:
                 continue
-            item = QListWidgetItem(("▰  " if path.is_file() else "▱  ") + path.name)
+            item = QListWidgetItem()
             item.setToolTip(normalized)
             item.setData(Qt.ItemDataRole.UserRole, normalized)
             self.file_list.addItem(item)
+            row = self._path_row(path, normalized)
+            self.file_list.setItemWidget(item, row)
+            item.setSizeHint(row.sizeHint())
             existing.add(normalized)
+        if self.file_list.count() == 0:
+            empty = QListWidgetItem()
+            empty.setFlags(Qt.ItemFlag.NoItemFlags)
+            empty.setSizeHint(self._empty_row_size())
+            self.file_list.addItem(empty)
+            self.file_list.setItemWidget(empty, self._empty_row())
         self._refresh_count()
+
+    def _empty_row_size(self):
+        return QSize(300, max(92, self.file_list.viewport().height() - 14))
+
+    def _empty_row(self) -> QWidget:
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(5)
+        title = QLabel("La lista está vacía")
+        title.setObjectName("emptyTitle")
+        detail = QLabel("Arrastra PDFs aquí o selecciónalos arriba")
+        detail.setObjectName("muted")
+        layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(detail, alignment=Qt.AlignmentFlag.AlignCenter)
+        return box
+
+    def _path_row(self, path: Path, normalized: str) -> QWidget:
+        row = QFrame()
+        row.setObjectName("fileRow")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(8, 7, 6, 7)
+        layout.setSpacing(12)
+        badge = QLabel("PDF" if path.is_file() else "DIR")
+        badge.setObjectName("fileBadge")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setFixedWidth(42)
+        text_box = QVBoxLayout()
+        text_box.setSpacing(3)
+        name = QLabel(path.name)
+        name.setObjectName("fileName")
+        subpath = QLabel(normalized)
+        subpath.setObjectName("filePath")
+        subpath.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        text_box.addWidget(name)
+        text_box.addWidget(subpath)
+        text_box.setStretch(1, 1)
+        status = QLabel("En cola")
+        status.setObjectName("statusChip")
+        status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status.setMinimumWidth(78)
+        self._status_widgets[normalized] = status
+        remove = QPushButton("×")
+        remove.setObjectName("rowRemoveButton")
+        remove.setFixedSize(30, 30)
+        remove.setToolTip("Quitar de la lista")
+        remove.clicked.connect(lambda: self._remove_path(normalized))
+        layout.addWidget(badge)
+        layout.addLayout(text_box, 1)
+        layout.addWidget(status)
+        layout.addWidget(remove)
+        return row
+
+    def _remove_path(self, normalized: str) -> None:
+        if self.worker_thread is not None:
+            return
+        for index in range(self.file_list.count()):
+            item = self.file_list.item(index)
+            if item.data(Qt.ItemDataRole.UserRole) == normalized:
+                self.file_list.takeItem(index)
+                break
+        self._status_widgets.pop(normalized, None)
+        self._refresh_count()
+
+    def _set_item_status(self, normalized: str, label: str) -> None:
+        status = self._status_widgets.get(normalized)
+        if status:
+            status.setText(label)
 
     def _refresh_count(self) -> None:
         count = sum(1 for i in range(self.file_list.count())
                     if self.file_list.item(i).data(Qt.ItemDataRole.UserRole))
+        if count == 0 and self.file_list.count() == 0:
+            empty = QListWidgetItem()
+            empty.setFlags(Qt.ItemFlag.NoItemFlags)
+            empty.setSizeHint(self._empty_row_size())
+            self.file_list.addItem(empty)
+            self.file_list.setItemWidget(empty, self._empty_row())
         self.count_label.setText(f"{count} elemento" if count == 1 else f"{count} elementos")
         self.clean_button.setEnabled(count > 0 and self.worker_thread is None)
+        self.remove_button.setEnabled(count > 0 and self.worker_thread is None)
+        self.clear_button.setEnabled(count > 0 and self.worker_thread is None)
 
     def pick_files(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(self, "Añadir PDFs", str(Path.home()), "PDFs (*.pdf)")
@@ -358,11 +454,13 @@ class MainWindow(QMainWindow):
     def clear_list(self) -> None:
         if self.worker_thread is None:
             self.file_list.clear()
+            self._status_widgets.clear()
             self._refresh_count()
 
     def remove_selected(self) -> None:
         if self.worker_thread is None:
             for item in self.file_list.selectedItems():
+                self._status_widgets.pop(item.data(Qt.ItemDataRole.UserRole), None)
                 self.file_list.takeItem(self.file_list.row(item))
             self._refresh_count()
 
@@ -390,6 +488,10 @@ class MainWindow(QMainWindow):
         self.clean_button.setEnabled(False)
         self.files_button.setEnabled(False)
         self.folder_button.setEnabled(False)
+        self.remove_button.setEnabled(False)
+        self.clear_button.setEnabled(False)
+        self.replace_checkbox.setEnabled(False)
+        self.output_button.setEnabled(False)
         self.progress.setRange(0, 0)
         self.status_label.setText("Preparando lote…")
         self.worker_thread = QThread(self)
@@ -409,6 +511,17 @@ class MainWindow(QMainWindow):
         self.progress.setValue(done)
         name = Path(row["source"]).name
         self.status_label.setText(f"{done} de {total} · {name}: {self._status_text(row)}")
+        source = Path(row["source"]).resolve()
+        for index in range(self.file_list.count()):
+            item = self.file_list.item(index)
+            value = item.data(Qt.ItemDataRole.UserRole)
+            if not value:
+                continue
+            selected = Path(value).resolve()
+            if source == selected:
+                self._set_item_status(value, self._status_text(row).capitalize())
+            elif selected.is_dir() and source.is_relative_to(selected):
+                self._set_item_status(value, "Procesando")
 
     @staticmethod
     def _status_text(row: dict) -> str:
@@ -423,6 +536,23 @@ class MainWindow(QMainWindow):
         removed += sum(len(row.get("removed_regions", [])) + len(row.get("removed_branding", [])) for row in rows)
         self.progress.setRange(0, max(1, len(rows)))
         self.progress.setValue(len(rows))
+        for index in range(self.file_list.count()):
+            item = self.file_list.item(index)
+            value = item.data(Qt.ItemDataRole.UserRole)
+            if not value:
+                continue
+            selected = Path(value).resolve()
+            matching = [row for row in rows if Path(row.get("source", "")).resolve() == selected
+                        or (selected.is_dir() and Path(row.get("source", "")).resolve().is_relative_to(selected))]
+            if selected.is_file() and matching:
+                self._set_item_status(value, self._status_text(matching[0]).capitalize())
+            elif selected.is_dir() and matching:
+                clean_count = sum(row.get("status") == "cleaned" for row in matching)
+                skip_count = sum(row.get("status") in {"skipped", "unchanged"} for row in matching)
+                error_count = sum(row.get("status") == "error" for row in matching)
+                self._set_item_status(value, f"{clean_count} limpios · {skip_count} sin cambios" + (f" · {error_count} errores" if error_count else ""))
+            elif selected.is_dir():
+                self._set_item_status(value, "Sin PDFs")
         if not rows:
             self.status_label.setText("No se encontraron PDFs en la selección")
         else:
@@ -440,8 +570,16 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.files_button.setEnabled(True)
         self.folder_button.setEnabled(True)
+        self.replace_checkbox.setEnabled(True)
+        self.output_button.setEnabled(True)
         self.progress.setRange(0, 1)
         self._refresh_count()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if (self.file_list.count() == 1
+                and not self.file_list.item(0).data(Qt.ItemDataRole.UserRole)):
+            self.file_list.item(0).setSizeHint(self._empty_row_size())
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():

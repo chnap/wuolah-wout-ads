@@ -17,6 +17,12 @@ Download the app for your computer from **[the latest release](https://github.co
 
 The files named `wuolah-wout-ads-gui-*` are the graphical app. Download the one for your system and open it. Add PDFs or folders by dragging them into the window or using the buttons. It replaces originals by default after asking for confirmation; turn that option off to save copies to a chosen folder. Your theme preference is saved locally. There is no installer.
 
+### Desktop app preview
+
+| Dark theme | Light theme |
+| --- | --- |
+| ![Wuolah Wout Ads desktop app in dark theme](docs/screenshots/gui-dark.png) | ![Wuolah Wout Ads desktop app in light theme](docs/screenshots/gui-light.png) |
+
 The app shows a batch summary when it finishes. Wuolah PDFs it cannot identify are skipped, and it reports errors and unchanged files separately. It only removes patterns its local detector recognizes; it cannot promise that every visual mark is found.
 
 The command-line download remains available. On Windows, open PowerShell and run:
