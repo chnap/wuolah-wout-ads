@@ -4,4 +4,5 @@ __pycache__/
 .venv/
 dist/
 build/
+*.spec
 *_clean.pdf

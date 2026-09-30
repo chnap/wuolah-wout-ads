@@ -1,10 +1,10 @@
 # wuolah-wout-ads
 
-Remove detected ads from Wuolah PDFs on your computer. No browser upload, OCR, or AI call: your PDFs stay local and cleaning uses **zero AI tokens**.
+Remove detected ads from Wuolah PDFs on your computer. Use the desktop app or terminal. No browser upload, OCR, or AI call: your PDFs stay local and cleaning uses **zero AI tokens**.
 
 ## Install (no Python, pipx, or repo clone)
 
-Download the file for your computer from **[the latest release](https://github.com/chnap/wuolah-wout-ads/releases/latest)**:
+Download the app for your computer from **[the latest release](https://github.com/chnap/wuolah-wout-ads/releases/latest)**:
 
 | Computer | Download |
 | --- | --- |
@@ -12,8 +12,14 @@ Download the file for your computer from **[the latest release](https://github.c
 | macOS Intel | `wuolah-wout-ads-macos-x86_64` |
 | macOS Apple Silicon (M1/M2/M3/M4) | `wuolah-wout-ads-macos-aarch64` |
 | Linux 64-bit (x86_64) | `wuolah-wout-ads-linux-x86_64` |
+| Linux desktop app | `wuolah-wout-ads-gui-linux-x86_64` |
+| Windows desktop app | `wuolah-wout-ads-gui-windows-x86_64.exe` |
 
-The download is the app; there is no installer. On Windows, open PowerShell and run:
+The files named `wuolah-wout-ads-gui-*` are the graphical app. Download the one for your system and open it. Add PDFs or folders by dragging them into the window or using the buttons. It replaces originals by default after asking for confirmation; turn that option off to save copies to a chosen folder. Your theme preference is saved locally. There is no installer.
+
+The app shows a batch summary when it finishes. Wuolah PDFs it cannot identify are skipped, and it reports errors and unchanged files separately. It only removes patterns its local detector recognizes; it cannot promise that every visual mark is found.
+
+The command-line download remains available. On Windows, open PowerShell and run:
 
 ```powershell
 & "$HOME\Downloads\wuolah-wout-ads-windows-x86_64.exe" "$HOME\Downloads\apuntes.pdf"
@@ -134,7 +140,7 @@ To work on the source code, clone the repo and install it in editable mode:
 ```bash
 git clone https://github.com/chnap/wuolah-wout-ads.git
 cd wuolah-wout-ads
-python -m pip install -e .
+python -m pip install -e '.[gui]'
 ```
 
 MIT licensed. See [LICENSE](LICENSE).
